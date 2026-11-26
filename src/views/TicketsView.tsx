@@ -12,9 +12,59 @@ import {
   X,
   AlertCircle,
   Search,
+  Camera,
 } from 'lucide-react';
 import { getTicketsApi, responderTicketApi } from '../api';
 import { TicketAdmin } from '../types';
+
+interface FotoTicket {
+  descripcion: string;
+  url: string;
+}
+
+function parsearMensajeTicket(mensaje: string): { textoLimpio: string; fotos: FotoTicket[] } {
+  if (!mensaje) return { textoLimpio: '', fotos: [] };
+  const lineas = mensaje.split('\n');
+  const lineasLimpias: string[] = [];
+  const fotos: FotoTicket[] = [];
+  let descripcionPendiente = '';
+
+  for (let i = 0; i < lineas.length; i++) {
+    const linea = lineas[i];
+    const trimmed = linea.trim();
+
+    if (/^Fotos y Evidencias adjuntas\s*\(\d+\):$/i.test(trimmed)) {
+      continue;
+    }
+
+    const matchFotoHeader = trimmed.match(/^Foto\s+\d+:\s*(.*)$/i);
+    if (matchFotoHeader && i + 1 < lineas.length && /^URL\/Data:\s*/i.test(lineas[i + 1].trim())) {
+      descripcionPendiente = matchFotoHeader[1]?.trim() || 'Sin descripción';
+      continue;
+    }
+
+    const matchUrl = trimmed.match(/^URL\/Data:\s*(.+)$/i);
+    if (matchUrl) {
+      const url = matchUrl[1].trim();
+      if (url) {
+        fotos.push({
+          descripcion: descripcionPendiente || 'Evidencia adjunta',
+          url,
+        });
+      }
+      descripcionPendiente = '';
+      continue;
+    }
+
+    descripcionPendiente = '';
+    lineasLimpias.push(linea);
+  }
+
+  return {
+    textoLimpio: lineasLimpias.join('\n').trim(),
+    fotos,
+  };
+}
 
 export const TicketsView: React.FC = () => {
   const [tickets, setTickets] = useState<TicketAdmin[]>([]);
@@ -25,6 +75,7 @@ export const TicketsView: React.FC = () => {
 
   // Modal para Responder
   const [ticketSeleccionado, setTicketSeleccionado] = useState<TicketAdmin | null>(null);
+  const [fotoPreviewUrl, setFotoPreviewUrl] = useState<string | null>(null);
   const [respuestaTexto, setRespuestaTexto] = useState('');
   const [nuevoEstado, setNuevoEstado] = useState<'PENDIENTE' | 'EN_REVISION' | 'RESPONDIDO' | 'CERRADO'>('RESPONDIDO');
   const [enviando, setEnviando] = useState(false);
@@ -49,22 +100,26 @@ export const TicketsView: React.FC = () => {
     cargarTickets();
   }, [filtroTipo, filtroEstado]);
 
-  // Listener para cerrar modal con tecla Escape
+  // Listener para cerrar lightbox o modal con tecla Escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && ticketSeleccionado) {
-        setTicketSeleccionado(null);
+      if (e.key === 'Escape') {
+        if (fotoPreviewUrl) {
+          setFotoPreviewUrl(null);
+        } else if (ticketSeleccionado) {
+          setTicketSeleccionado(null);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [ticketSeleccionado]);
+  }, [fotoPreviewUrl, ticketSeleccionado]);
 
   const ticketsFiltrados = tickets.filter((t) => {
     if (!busqueda.trim()) return true;
     const q = busqueda.trim().toLowerCase();
     const titulo = t.titulo?.toLowerCase() || '';
-    const mensaje = t.mensaje?.toLowerCase() || '';
+    const mensaje = parsearMensajeTicket(t.mensaje || '').textoLimpio.toLowerCase();
     const alias = t.jugador?.alias?.toLowerCase() || '';
     const email = t.jugador?.email?.toLowerCase() || '';
     const id = String(t.id);
@@ -172,6 +227,7 @@ export const TicketsView: React.FC = () => {
           {(
             [
               { id: 'TODOS', label: 'TODOS' },
+              { id: 'CANCHA', label: 'CANCHA' },
               { id: 'SUGERENCIA', label: 'SUGERENCIA' },
               { id: 'PROBLEMA', label: 'PROBLEMA' },
               { id: 'IDEA', label: 'IDEA' },
@@ -231,6 +287,7 @@ export const TicketsView: React.FC = () => {
         <div className="space-y-4">
           {ticketsFiltrados.map((t) => {
             const esPendiente = t.estado === 'PENDIENTE';
+            const { textoLimpio, fotos } = parsearMensajeTicket(t.mensaje);
             return (
               <div
                 key={t.id}
@@ -277,8 +334,38 @@ export const TicketsView: React.FC = () => {
                 <div>
                   <h4 className="text-base font-bold text-white mb-1">{t.titulo}</h4>
                   <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap bg-tactical-input/50 p-3 rounded-lg border border-tactical-border/40">
-                    {t.mensaje}
+                    {textoLimpio}
                   </p>
+
+                  {fotos.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <span className="text-[10px] font-bold text-tactical-orange uppercase tracking-wider flex items-center space-x-1.5">
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Evidencias adjuntas ({fotos.length})</span>
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                        {fotos.map((foto, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setFotoPreviewUrl(foto.url)}
+                            className="text-left bg-tactical-input border border-tactical-border hover:border-tactical-orange rounded-lg overflow-hidden transition group"
+                          >
+                            <div className="h-28 w-full bg-black/40 overflow-hidden">
+                              <img
+                                src={foto.url}
+                                alt={foto.descripcion}
+                                className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
+                              />
+                            </div>
+                            <p className="p-2 text-[11px] text-slate-300 truncate">
+                              {foto.descripcion}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Respuesta del Staff si existe */}
@@ -330,14 +417,50 @@ export const TicketsView: React.FC = () => {
 
             <form onSubmit={handleEnviarRespuesta} className="p-6 space-y-5">
               {/* Mensaje original del usuario */}
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Mensaje del Operador ({ticketSeleccionado.jugador.alias}):
-                </label>
-                <div className="p-3 bg-tactical-input border border-tactical-border rounded-lg text-xs text-slate-300 max-h-36 overflow-y-auto whitespace-pre-wrap">
-                  {ticketSeleccionado.mensaje}
-                </div>
-              </div>
+              {(() => {
+                const { textoLimpio, fotos } = parsearMensajeTicket(ticketSeleccionado.mensaje);
+                return (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                        Mensaje del Operador ({ticketSeleccionado.jugador.alias}):
+                      </label>
+                      <div className="p-3 bg-tactical-input border border-tactical-border rounded-lg text-xs text-slate-300 max-h-36 overflow-y-auto whitespace-pre-wrap">
+                        {textoLimpio}
+                      </div>
+                    </div>
+
+                    {fotos.length > 0 && (
+                      <div>
+                        <span className="text-[10px] font-bold text-tactical-orange uppercase tracking-wider flex items-center space-x-1.5 mb-1.5">
+                          <Camera className="w-3.5 h-3.5" />
+                          <span>Evidencias adjuntas ({fotos.length})</span>
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          {fotos.map((foto, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => setFotoPreviewUrl(foto.url)}
+                              className="w-24 bg-tactical-input border border-tactical-border hover:border-tactical-orange rounded-lg overflow-hidden transition"
+                              title={foto.descripcion}
+                            >
+                              <img
+                                src={foto.url}
+                                alt={foto.descripcion}
+                                className="w-full h-16 object-cover"
+                              />
+                              <p className="px-1.5 py-1 text-[10px] text-slate-300 truncate">
+                                {foto.descripcion}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Nuevo Estado */}
               <div>
@@ -415,6 +538,28 @@ export const TicketsView: React.FC = () => {
               </div>
             </form>
           </div>
+        </div>
+      )}
+      {/* LIGHTBOX DE EVIDENCIA ADJUNTA */}
+      {fotoPreviewUrl && (
+        <div
+          onClick={() => setFotoPreviewUrl(null)}
+          className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <button
+            type="button"
+            onClick={() => setFotoPreviewUrl(null)}
+            className="absolute top-5 right-5 p-2.5 rounded-full bg-tactical-card border border-tactical-border text-white hover:border-tactical-orange transition"
+            title="Cerrar vista previa (Esc)"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <img
+            src={fotoPreviewUrl}
+            alt="Evidencia adjunta"
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-full max-h-[88vh] rounded-xl border border-tactical-border shadow-2xl object-contain"
+          />
         </div>
       )}
     </div>
