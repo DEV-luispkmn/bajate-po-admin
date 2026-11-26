@@ -1,6 +1,12 @@
 import { AdminUser, EstadisticasAdmin, CanchaAdmin, TicketAdmin, JugadorAdmin, EquipoAdmin } from './types';
 
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+export const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (typeof window !== 'undefined' &&
+  window.location.port !== '5173' &&
+  window.location.origin !== 'null'
+    ? window.location.origin
+    : 'http://localhost:8080');
 const TOKEN_KEY = 'bajate_po_admin_token';
 const USER_KEY = 'bajate_po_admin_user';
 
@@ -32,6 +38,7 @@ async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': 'true',
     ...(options.headers as Record<string, string>),
   };
 
